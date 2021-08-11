@@ -27,13 +27,14 @@ except KeyboardInterrupt as e:
 # MNE Stuff
 # Reference: https://jasmainak.github.io/mne-workshop-brown/evoked_to_stc/stc.html
 
+# Raw data from Neurosity Crown headset
 data = sample
 
+# Raw EEG data
 raw = mne.io.read_raw_fif(sample)
 
-
-# ??? What is stim_channel? -- Regardless the code executes
-events = mne.find_events(raw, stim_channel='STI 014')
+# Find events from raw file
+events = mne.find_events(raw)
 
 
 
