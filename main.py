@@ -1,55 +1,134 @@
 import mne
-import numpy as np
-import matplotlib.pyplot as plt
-from pylsl import StreamInlet, resolve_stream
+import argparse
+import time
+import logging
+import random
 
-#########################################################
-#########################################################
-#             Lab Streaming Layer                       #
-#########################################################
-#########################################################
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtGui, QtCore
 
-# Lab Streaming Layer running on Neurosity Crown headset
-# Ensure Neurosity Crown is connected to same WiFi network as computer
-# Reference: https://support.neurosity.co/hc/en-us/articles/360039387812-Reading-data-into-Python-via-LSL
-
-try:
-    # first resolve an EEG stream on the lab network
-    print("looking for an EEG stream...")
-    streams = resolve_stream('type', 'EEG')
-    # create a new inlet to read from the stream
-    inlet = StreamInlet(streams[0])
-    while True:
-        # get a new sample (you can also omit the timestamp part if you're not
-        # interested in it)
-        sample, timestamp = inlet.pull_sample()
-except KeyboardInterrupt as e:
-    print("Ending program")
-    raise e
+import brainflow
+from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds, BrainFlowError
+from brainflow.data_filter import DataFilter, FilterTypes, AggOperations, WindowFunctions, DetrendOperations
 
 
-#########################################################
-#########################################################
-#         End of Lab Streaming Layer Processing         #
-#########################################################
-#########################################################
+class Graph:
+    def __init__(self, board_shim):
+        self.board_id = board_shim.get_board_id()
+        self.board_shim = board_shim
+        self.exg_channels = BoardShim.get_exg_channels(self.board_id)
+        self.sampling_rate = BoardShim.get_sampling_rate(self.board_id)
+        self.update_speed_ms = 50
+        self.window_size = 4
+        self.num_points = self.window_size * self.sampling_rate
+
+        self.app = QtGui.QApplication([])
+        self.win = pg.GraphicsWindow(title='BrainFlow Plot',size=(800, 600))
+
+        self._init_timeseries()
+
+        timer = QtCore.QTimer()
+        timer.timeout.connect(self.update)
+        timer.start(self.update_speed_ms)
+        QtGui.QApplication.instance().exec_()
+        params = BrainFlowInputParams()
+        board = BoardShim(BoardIds.CROWN_BOARD.value, params)
+        data = board.get_board_data()
+
+        eeg_channels = BoardShim.get_eeg_channels(BoardIds.CROWN_BOARD.value)
+        eeg_data = data[eeg_channels, :]
+        eeg_data = eeg_data / 1000000  # BrainFlow returns uV, convert to V for MNE
+
+        # Creating MNE objects from brainflow data arrays
+        ch_types = ['eeg'] * len(eeg_channels)
+        ch_names = BoardShim.get_eeg_names(BoardIds.CROWN_BOARD.value)
+        sfreq = BoardShim.get_sampling_rate(BoardIds.CROWN_BOARD.value)
+        info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
+        raw = mne.io.RawArray(eeg_data, info)
 
 
+    def _init_timeseries(self):
+        self.plots = list()
+        self.curves = list()
+        for i in range(len(self.exg_channels)):
+            p = self.win.addPlot(row=i,col=0)
+            p.showAxis('left', False)
+            p.setMenuEnabled('left', False)
+            p.showAxis('bottom', False)
+            p.setMenuEnabled('bottom', False)
+            if i == 0:
+                p.setTitle('TimeSeries Plot')
+            self.plots.append(p)
+            curve = p.plot()
+            self.curves.append(curve)
 
-# Reference: https://jasmainak.github.io/mne-workshop-brown/evoked_to_stc/stc.html
+    def update(self):
+        data = self.board_shim.get_current_board_data(self.num_points)
+        avg_bands = [0, 0, 0, 0, 0]
+        for count, channel in enumerate(self.exg_channels):
+            # plot timeseries
+            DataFilter.detrend(data[channel], DetrendOperations.CONSTANT.value)
+            DataFilter.perform_bandpass(data[channel], self.sampling_rate, 51.0, 100.0, 2,
+                                        FilterTypes.BUTTERWORTH.value, 0)
+            DataFilter.perform_bandpass(data[channel], self.sampling_rate, 51.0, 100.0, 2,
+                                        FilterTypes.BUTTERWORTH.value, 0)
+            DataFilter.perform_bandstop(data[channel], self.sampling_rate, 50.0, 4.0, 2,
+                                        FilterTypes.BUTTERWORTH.value, 0)
+            DataFilter.perform_bandstop(data[channel], self.sampling_rate, 60.0, 4.0, 2,
+                                        FilterTypes.BUTTERWORTH.value, 0)
+            self.curves[count].setData(data[channel].tolist())
 
-# Raw data from Neurosity Crown headset
-data = sample
-
-# Raw EEG data fed into MNE-Python package
-raw = mne.io.read_raw_fif(sample)
-
-# Find EEG events from raw file
-events = mne.find_events(raw)
+        self.app.processEvents()
 
 
+def main():
+    BoardShim.enable_dev_board_logger()
+    logging.basicConfig(level=logging.DEBUG)
+
+    parser = argparse.ArgumentParser()
+    # use docs to check which parameters are required for specific board, e.g. for Cyton - set serial port
+    parser.add_argument('--timeout', type=int, help='timeout for device discovery or connection', required=False,
+                        default=0)
+    parser.add_argument('--ip-port', type=int, help='ip port', required=False, default=0)
+    parser.add_argument('--ip-protocol', type=int, help='ip protocol, check IpProtocolType enum', required=False,
+                        default=0)
+    parser.add_argument('--ip-address', type=str, help='ip address', required=False, default='')
+    parser.add_argument('--serial-port', type=str, help='serial port', required=False, default='')
+    parser.add_argument('--mac-address', type=str, help='mac address', required=False, default='')
+    parser.add_argument('--other-info', type=str, help='other info', required=False, default='')
+    parser.add_argument('--streamer-params', type=str, help='streamer params', required=False, default='')
+    parser.add_argument('--serial-number', type=str, help='serial number', required=False, default='')
+    parser.add_argument('--board-id', type=int, help='board id, check docs to get a list of supported boards',
+                        required=False, default=BoardIds.CROWN_BOARD)
+    parser.add_argument('--file', type=str, help='file', required=False, default='')
+    args = parser.parse_args()
+
+    params = BrainFlowInputParams()
+    params.ip_port = args.ip_port
+    params.serial_port = args.serial_port
+    params.mac_address = args.mac_address
+    params.other_info = args.other_info
+    params.serial_number = args.serial_number
+    params.ip_address = args.ip_address
+    params.ip_protocol = args.ip_protocol
+    params.timeout = args.timeout
+    params.file = args.file
+
+    try:
+        board_shim = BoardShim(args.board_id, params)
+        board_shim.prepare_session()
+        board_shim.start_stream(450000, args.streamer_params)
+        g = Graph(board_shim)
+    except BaseException as e:
+        logging.warning('Exception', exc_info=True)
+    finally:
+        logging.info('End')
+        if board_shim.is_prepared():
+            logging.info('Releasing session')
+            board_shim.release_session()
 
 
-
+if __name__ == '__main__':
+    main()
 
 
