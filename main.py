@@ -3,7 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pylsl import StreamInlet, resolve_stream
 
-
+#########################################################
+#########################################################
+#             Lab Streaming Layer                       #
+#########################################################
+#########################################################
 
 # Lab Streaming Layer running on Neurosity Crown headset
 # Ensure Neurosity Crown is connected to same WiFi network as computer
@@ -24,16 +28,23 @@ except KeyboardInterrupt as e:
     raise e
 
 
-# MNE Stuff
+#########################################################
+#########################################################
+#         End of Lab Streaming Layer Processing         #
+#########################################################
+#########################################################
+
+
+
 # Reference: https://jasmainak.github.io/mne-workshop-brown/evoked_to_stc/stc.html
 
 # Raw data from Neurosity Crown headset
 data = sample
 
-# Raw EEG data
+# Raw EEG data fed into MNE-Python package
 raw = mne.io.read_raw_fif(sample)
 
-# Find events from raw file
+# Find EEG events from raw file
 events = mne.find_events(raw)
 
 
