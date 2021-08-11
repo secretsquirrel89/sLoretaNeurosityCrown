@@ -1,4 +1,3 @@
-"""Example program to show how to read a multi-channel time series from LSL."""
 import mne
 import numpy as np
 import matplotlib.pyplot as plt
