@@ -18,14 +18,11 @@ class Graph:
         self.board_shim = board_shim
         self.exg_channels = BoardShim.get_exg_channels(self.board_id)
         self.sampling_rate = BoardShim.get_sampling_rate(self.board_id)
-        self.update_speed_ms = 50
         self.window_size = 4
         self.num_points = self.window_size * self.sampling_rate
+        self.update_speed_ms = 50
 
         self.app = QtGui.QApplication([])
-        self.win = pg.GraphicsWindow(title='BrainFlow Plot',size=(800, 600))
-
-        self._init_timeseries()
 
         timer = QtCore.QTimer()
         timer.timeout.connect(self.update)
@@ -47,21 +44,6 @@ class Graph:
         raw = mne.io.RawArray(eeg_data, info)
 
 
-    def _init_timeseries(self):
-        self.plots = list()
-        self.curves = list()
-        for i in range(len(self.exg_channels)):
-            p = self.win.addPlot(row=i,col=0)
-            p.showAxis('left', False)
-            p.setMenuEnabled('left', False)
-            p.showAxis('bottom', False)
-            p.setMenuEnabled('bottom', False)
-            if i == 0:
-                p.setTitle('TimeSeries Plot')
-            self.plots.append(p)
-            curve = p.plot()
-            self.curves.append(curve)
-
     def update(self):
         data = self.board_shim.get_current_board_data(self.num_points)
         avg_bands = [0, 0, 0, 0, 0]
@@ -76,7 +58,6 @@ class Graph:
                                         FilterTypes.BUTTERWORTH.value, 0)
             DataFilter.perform_bandstop(data[channel], self.sampling_rate, 60.0, 4.0, 2,
                                         FilterTypes.BUTTERWORTH.value, 0)
-            self.curves[count].setData(data[channel].tolist())
 
         self.app.processEvents()
 
@@ -117,7 +98,7 @@ def main():
     try:
         board_shim = BoardShim(args.board_id, params)
         board_shim.prepare_session()
-        board_shim.start_stream(450000, args.streamer_params)
+        board_shim.start_stream()
         g = Graph(board_shim)
     except BaseException as e:
         logging.warning('Exception', exc_info=True)
